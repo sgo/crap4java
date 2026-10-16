@@ -12,7 +12,9 @@ final class CoverageRunner {
     // 0.8.14 is the first JaCoCo that officially supports Java 25 class files
     // (0.8.13 covers Java 23 and 24); the family's projects compile to 25, so
     // 0.8.12 left every coverage and CRAP value N/A while the command exited 0.
-    private static final String JACOCO_VERSION = "0.8.14";
+    // Package-private so the tests build their expectations from this constant. They once
+    // hardcoded the version, and moving it to 0.8.14 left three of them failing.
+    static final String JACOCO_VERSION = "0.8.14";
 
     private final CommandExecutor executor;
 

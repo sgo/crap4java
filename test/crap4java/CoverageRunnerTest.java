@@ -37,9 +37,9 @@ class CoverageRunnerTest {
         assertFalse(Files.exists(exec));
         assertEquals(List.of(
                 "mvn", "-q",
-                "org.jacoco:jacoco-maven-plugin:0.8.12:prepare-agent",
+                "org.jacoco:jacoco-maven-plugin:" + CoverageRunner.JACOCO_VERSION + ":prepare-agent",
                 "test",
-                "org.jacoco:jacoco-maven-plugin:0.8.12:report"
+                "org.jacoco:jacoco-maven-plugin:" + CoverageRunner.JACOCO_VERSION + ":report"
         ), executor.commands.get(0));
         assertEquals(tempDir, executor.directories.get(0));
     }
@@ -71,10 +71,12 @@ class CoverageRunnerTest {
                 javaToolOptions);
 
         assertEquals(List.of("mvn", "-q", "dependency:copy",
-                "-Dartifact=org.jacoco:org.jacoco.agent:0.8.12:jar:runtime",
+                "-Dartifact=org.jacoco:org.jacoco.agent:" + CoverageRunner.JACOCO_VERSION + ":jar:runtime",
                 "-DoutputDirectory=target/jacoco-agent",
                 "-Dmdep.stripVersion=true"), executor.commands.get(0));
-        assertEquals(List.of("mvn", "-q", "org.jacoco:jacoco-maven-plugin:0.8.12:report"), executor.commands.get(1));
+        assertEquals(List.of("mvn", "-q",
+                "org.jacoco:jacoco-maven-plugin:" + CoverageRunner.JACOCO_VERSION + ":report"),
+                executor.commands.get(1));
     }
 
     @Test
@@ -88,7 +90,9 @@ class CoverageRunnerTest {
 
         runner.generateCoverage(tempDir, "scripts/run-unit-tests.sh");
 
-        assertEquals(List.of("mvn", "-q", "org.jacoco:jacoco-maven-plugin:0.8.12:report"), executor.commands.get(0));
+        assertEquals(List.of("mvn", "-q",
+                "org.jacoco:jacoco-maven-plugin:" + CoverageRunner.JACOCO_VERSION + ":report"),
+                executor.commands.get(0));
     }
 
     @Test

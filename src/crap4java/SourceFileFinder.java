@@ -5,8 +5,18 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
 
 final class SourceFileFinder {
+
+    /**
+     * The first directory under {@code src/} that holds test sources. JaCoCo's report covers
+     * production classes and never test classes, so scoring the test tree can only produce N/A
+     * rows - 1924 of them in one module run of a real project. Only the first element of the
+     * path is compared, so a package named {@code test} inside {@code src/main/java} is still
+     * scored; that is why this is a root check rather than a search for a segment.
+     */
+    private static final Set<String> TEST_SOURCE_ROOTS = Set.of("test", "testFixtures");
 
     private SourceFileFinder() {
     }
@@ -20,9 +30,18 @@ final class SourceFileFinder {
         try (var stream = Files.walk(src)) {
             return stream
                     .filter(path -> path.toString().endsWith(".java"))
+                    .filter(path -> !isUnderTestSources(src, path))
                     .sorted(Comparator.naturalOrder())
                     .toList();
         }
+    }
+
+    private static boolean isUnderTestSources(Path src, Path file) {
+        Path relative = src.relativize(file);
+        if (relative.getNameCount() == 0) {
+            return false;
+        }
+        return TEST_SOURCE_ROOTS.contains(relative.getName(0).toString());
     }
 }
 
