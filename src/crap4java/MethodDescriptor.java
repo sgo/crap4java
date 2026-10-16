@@ -1,6 +1,7 @@
 package crap4java;
 
 record MethodDescriptor(
+        String className,
         String name,
         int startLine,
         int endLine,

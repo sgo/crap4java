@@ -25,7 +25,9 @@ import javax.tools.ToolProvider;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.List;
 
 final class JavaMethodParser {
@@ -49,17 +51,20 @@ final class JavaMethodParser {
                     List.of(new SourceFileObject(className, source))
             );
             Iterable<? extends CompilationUnitTree> units = task.parse();
-            return collectMethods(task, units);
+            return collectMethods(task, units, withoutJavaSuffix(className));
         } catch (IOException ex) {
             throw new UncheckedIOException(ex);
         }
     }
 
     static String sourcePath(String className) {
-        String normalized = className.endsWith(".java")
+        return withoutJavaSuffix(className).replace('.', '/') + ".java";
+    }
+
+    private static String withoutJavaSuffix(String className) {
+        return className.endsWith(".java")
                 ? className.substring(0, className.length() - ".java".length())
                 : className;
-        return normalized.replace('.', '/') + ".java";
     }
 
     static URI sourceUri(String className) {
@@ -67,12 +72,13 @@ final class JavaMethodParser {
     }
 
     private static List<MethodDescriptor> collectMethods(JavacTask task,
-                                                         Iterable<? extends CompilationUnitTree> units) {
+                                                         Iterable<? extends CompilationUnitTree> units,
+                                                         String className) {
         Trees trees = Trees.instance(task);
         List<MethodDescriptor> methods = new ArrayList<>();
         for (CompilationUnitTree unit : units) {
             SourcePositions positions = trees.getSourcePositions();
-            new MethodScanner(unit, positions, methods).scan(unit, null);
+            new MethodScanner(unit, positions, methods, className).scan(unit, null);
         }
         return methods;
     }
@@ -81,13 +87,34 @@ final class JavaMethodParser {
         private final CompilationUnitTree unit;
         private final SourcePositions positions;
         private final List<MethodDescriptor> methods;
+        private final String fileClassName;
+        /**
+         * The types we are inside, innermost first. A method belongs to the innermost one, and
+         * its name has to be that type's binary name - `Outer$Nested`, `Outer$1` - because a
+         * binary name is how JaCoCo keys a class in its report. Naming every method after the
+         * file instead is what left nested and anonymous methods at N/A: 42 rows in one module
+         * run of a real project.
+         */
+        private final Deque<Frame> frames = new ArrayDeque<>();
 
         private MethodScanner(CompilationUnitTree unit,
                               SourcePositions positions,
-                              List<MethodDescriptor> methods) {
+                              List<MethodDescriptor> methods,
+                              String fileClassName) {
             this.unit = unit;
             this.positions = positions;
             this.methods = methods;
+            this.fileClassName = fileClassName;
+        }
+
+        @Override
+        public Void visitClass(ClassTree node, Void unused) {
+            frames.push(new Frame(binaryNameOf(node)));
+            try {
+                return super.visitClass(node, unused);
+            } finally {
+                frames.pop();
+            }
         }
 
         @Override
@@ -101,12 +128,66 @@ final class JavaMethodParser {
             int startLine = lineNumber(start);
             int endLine = lineNumber(Math.decrementExact((int) bodyEndExclusive));
             int complexity = ComplexityCounter.count(node);
-            methods.add(new MethodDescriptor(node.getName().toString(), startLine, endLine, complexity));
-            return null;
+            methods.add(new MethodDescriptor(enclosingClassName(), node.getName().toString(),
+                    startLine, endLine, complexity));
+            // Descend, so that a type declared inside this method - an anonymous one, a local
+            // one - is visited and its methods are named after it. Returning early here is why
+            // an anonymous class's methods were never collected at all.
+            return super.visitMethod(node, unused);
+        }
+
+        /**
+         * javac's naming, which is what JaCoCo reports: a member type is `Enclosing$SimpleName`
+         * and an anonymous type is `Enclosing$n`, with n counted per enclosing class over the
+         * anonymous types alone, in source order. Both were read off javac's own output for two
+         * sample files rather than remembered - the second sample showed that a local type does
+         * not advance that count. A local type takes `Enclosing$1<SimpleName>`: every sample here
+         * produced 1, but the general rule was not established, so a local type javac numbers
+         * differently lands on N/A - what it already was - rather than being mis-scored. The
+         * file's own type keeps the name the file was compiled as; a second top-level type in the
+         * same file takes its own simple name under the same package.
+         */
+        private String binaryNameOf(ClassTree node) {
+            String simple = node.getSimpleName().toString();
+            if (frames.isEmpty()) {
+                return simple.isEmpty() ? fileClassName : underSamePackage(simple);
+            }
+            Frame enclosing = frames.peek();
+            if (simple.isEmpty()) {
+                return enclosing.name + "$" + enclosing.nextIndex();
+            }
+            Tree parent = getCurrentPath().getParentPath().getLeaf();
+            return parent instanceof ClassTree
+                    ? enclosing.name + "$" + simple
+                    : enclosing.name + "$1" + simple;
+        }
+
+        private String underSamePackage(String simpleName) {
+            int lastDot = fileClassName.lastIndexOf('.');
+            String packagePrefix = lastDot < 0 ? "" : fileClassName.substring(0, lastDot + 1);
+            String fileSimpleName = lastDot < 0 ? fileClassName : fileClassName.substring(lastDot + 1);
+            return simpleName.equals(fileSimpleName) ? fileClassName : packagePrefix + simpleName;
+        }
+
+        private String enclosingClassName() {
+            return frames.isEmpty() ? fileClassName : frames.peek().name;
         }
 
         private int lineNumber(long position) {
             return (int) unit.getLineMap().getLineNumber(position);
+        }
+
+        private static final class Frame {
+            private final String name;
+            private int numbered;
+
+            private Frame(String name) {
+                this.name = name;
+            }
+
+            private int nextIndex() {
+                return ++numbered;
+            }
         }
     }
 

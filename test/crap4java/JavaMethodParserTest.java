@@ -34,8 +34,8 @@ class JavaMethodParserTest {
         List<MethodDescriptor> methods = JavaMethodParser.parse("demo.Sample", source);
 
         assertEquals(List.of(
-                new MethodDescriptor("alpha", 3, 8, 3),
-                new MethodDescriptor("beta", 10, 16, 4)
+                new MethodDescriptor("demo.Sample", "alpha", 3, 8, 3),
+                new MethodDescriptor("demo.Sample", "beta", 10, 16, 4)
         ), methods);
     }
 
@@ -56,11 +56,15 @@ class JavaMethodParserTest {
 
         List<MethodDescriptor> methods = JavaMethodParser.parse("Sample", source);
 
-        assertEquals(List.of(new MethodDescriptor("present", 7, 9, 1)), methods);
+        assertEquals(List.of(new MethodDescriptor("Sample", "present", 7, 9, 1)), methods);
     }
 
     @Test
-    void ignoresMethodsDeclaredInsideAnonymousClasses() {
+    void scoresMethodsDeclaredInsideAnonymousClassesUnderTheirBinaryName() {
+        // This used to ignore them, which is what the early return in the scanner produced
+        // rather than a decision anyone had written down. JaCoCo reports an anonymous class's
+        // methods - as `Sample$1` - so they are production code the gate should see, and the
+        // issue that asked for the naming (sgo/forgelet-forge#3) asks for them too.
         String source = """
                 class Sample {
                     int outer() {
@@ -78,7 +82,10 @@ class JavaMethodParserTest {
 
         List<MethodDescriptor> methods = JavaMethodParser.parse("Sample", source);
 
-        assertEquals(List.of(new MethodDescriptor("outer", 2, 11, 1)), methods);
+        assertEquals(List.of(
+                new MethodDescriptor("Sample", "outer", 2, 11, 1),
+                new MethodDescriptor("Sample$1", "run", 4, 8, 2)
+        ), methods);
     }
 
     @Test
@@ -95,7 +102,7 @@ class JavaMethodParserTest {
 
         List<MethodDescriptor> methods = JavaMethodParser.parse("demo.Sample", source);
 
-        assertEquals(List.of(new MethodDescriptor("helper", 4, 6, 1)), methods);
+        assertEquals(List.of(new MethodDescriptor("demo.Sample", "helper", 4, 6, 1)), methods);
     }
 
     @Test
@@ -113,7 +120,7 @@ class JavaMethodParserTest {
 
         List<MethodDescriptor> methods = JavaMethodParser.parse("Sample", source);
 
-        assertEquals(List.of(new MethodDescriptor("stable", 2, 7, 1)), methods);
+        assertEquals(List.of(new MethodDescriptor("Sample", "stable", 2, 7, 1)), methods);
     }
 
     @Test
@@ -144,7 +151,7 @@ class JavaMethodParserTest {
 
         List<MethodDescriptor> methods = JavaMethodParser.parse("Sample", source);
 
-        assertEquals(List.of(new MethodDescriptor("score", 2, 20, 10)), methods);
+        assertEquals(List.of(new MethodDescriptor("Sample", "score", 2, 20, 10)), methods);
     }
 
     @Test
@@ -197,9 +204,45 @@ class JavaMethodParserTest {
         List<MethodDescriptor> methods = JavaMethodParser.parse("Sample", source);
 
         assertEquals(List.of(
-                new MethodDescriptor("nested", 2, 29, 13),
-                new MethodDescriptor("switched", 31, 41, 4)
+                new MethodDescriptor("Sample", "nested", 2, 29, 13),
+                new MethodDescriptor("Sample", "switched", 31, 41, 4)
         ), methods);
+    }
+
+    @Test
+    void namesNestedAnonymousAndLocalTypesTheWayJavacDoes() {
+        // The names asserted here are the class files javac produced for a source of this shape,
+        // read off a scratch build rather than remembered: a member type is Enclosing$SimpleName,
+        // an anonymous type is Enclosing$n counted over the anonymous ones alone, and a local
+        // type came out as Enclosing$1<SimpleName> in every sample tried.
+        String source = """
+                class Sample {
+                    void outer() {
+                    }
+
+                    static class Nested {
+                        void nested() {
+                        }
+                    }
+
+                    void user() {
+                        Runnable anonymous = new Runnable() {
+                            public void run() {
+                            }
+                        };
+                        class Local {
+                            void local() {
+                            }
+                        }
+                        anonymous.run();
+                    }
+                }
+                """;
+
+        List<MethodDescriptor> methods = JavaMethodParser.parse("Sample", source);
+
+        assertEquals(List.of("Sample", "Sample$Nested", "Sample", "Sample$1", "Sample$1Local"),
+                methods.stream().map(MethodDescriptor::className).toList());
     }
 
     @Test
@@ -214,7 +257,7 @@ class JavaMethodParserTest {
 
         List<MethodDescriptor> methods = JavaMethodParser.parse("demo.Sample.java", source);
 
-        assertEquals(List.of(new MethodDescriptor("value", 2, 4, 1)), methods);
+        assertEquals(List.of(new MethodDescriptor("demo.Sample", "value", 2, 4, 1)), methods);
     }
 
     @Test
